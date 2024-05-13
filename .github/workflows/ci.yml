@@ -5,6 +5,12 @@ on:
     branches: [ main ]
 
 jobs:
+  test:
+    runs-on: 
+      - self-hosted
+      - e2e
+    steps:
+      - uses: actions/checkout@v4
   build:
     runs-on: ubuntu-latest
     container: quay.io/centos/centos:stream9
