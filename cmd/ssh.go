@@ -47,10 +47,19 @@ func doSsh(_ *cobra.Command, args []string) error {
 		return err
 	}
 
+	cacheConfigManager, err := config.NewCacheConfigManager(user.CacheDir(), id)
+	if err != nil {
+		return err
+	}
+	cacheConfig, err := cacheConfigManager.Read()
+	if err != nil {
+		return err
+	}
 	vm, err := vm.NewVM(vm.NewVMParameters{
 		ImageID:    id,
 		User:       user,
 		LibvirtUri: config.LibvirtUri,
+		CacheConfig: cacheConfig,
 	})
 
 	if err != nil {
@@ -75,6 +84,6 @@ func doSsh(_ *cobra.Command, args []string) error {
 		cmd = args[1:]
 	}
 
-	ExitCode, err = utils.WithExitCode(vm.RunSSH(cmd))
+	ExitCode, err = utils.WithExitCode(vm.RunSSH(cacheConfig.SshPort, cacheConfig.SshIdentity, cmd))
 	return err
 }

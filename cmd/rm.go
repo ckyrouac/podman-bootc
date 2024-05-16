@@ -71,11 +71,20 @@ func prune(id string) error {
 	if err != nil {
 		return err
 	}
+	cacheConfigManager, err := config.NewCacheConfigManager(user.CacheDir(), id)
+	if err != nil {
+		return err
+	}
+	cacheConfig, err := cacheConfigManager.Read()
+	if err != nil {
+		return err
+	}
 
 	bootcVM, err := vm.NewVM(vm.NewVMParameters{
 		ImageID:    id,
 		LibvirtUri: config.LibvirtUri,
 		User:       user,
+		CacheConfig: cacheConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to get VM %s: %v", id, err)

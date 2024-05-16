@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -192,7 +193,28 @@ func doRun(flags *cobra.Command, args []string) error {
 	}
 
 	// write down the config file
-	if err = bootcVM.WriteConfig(*bootcDisk, containerImage); err != nil {
+	isRunning, err = bootcVM.IsRunning()
+	if err != nil {
+		return fmt.Errorf("unable to check if VM is running: %w", err)
+	}
+	diskSize, err := bootcDisk.GetSize()
+	if err != nil {
+		return fmt.Errorf("unable to get disk size: %w", err)
+	}
+
+	cacheConfig := config.CacheConfig{
+		Id:          containerImage.Id,
+		SshPort:     sshPort,
+		SshIdentity: machineInfo.SSHIdentityPath,
+		RepoTag:     containerImage.RepoTag,
+		Created:     bootcDisk.GetCreatedAt().Format(time.RFC3339),
+		DiskSize:    strconv.FormatInt(diskSize, 10),
+	}
+	cacheConfigManager, err := config.NewCacheConfigManager(user.CacheDir(), containerImage.Id)
+	if err != nil {
+		return fmt.Errorf("unable to create cache config manager: %w", err)
+	}
+	if err = cacheConfigManager.Write(cacheConfig); err != nil {
 		return err
 	}
 
@@ -204,6 +226,7 @@ func doRun(flags *cobra.Command, args []string) error {
 	// by the previous defer()
 	cacheDir.Lock(cache.Shared)
 
+	//shell into the VM if not running in the background
 	if !vmConfig.Background {
 		if !vmConfig.Quiet {
 			var vmConsoleWg sync.WaitGroup
@@ -235,7 +258,7 @@ func doRun(flags *cobra.Command, args []string) error {
 		}
 
 		// ssh into the VM
-		ExitCode, err = utils.WithExitCode(bootcVM.RunSSH(cmd))
+		ExitCode, err = utils.WithExitCode(bootcVM.RunSSH(sshPort, machineInfo.SSHIdentityPath, cmd))
 		if err != nil {
 			return fmt.Errorf("ssh: %w", err)
 		}

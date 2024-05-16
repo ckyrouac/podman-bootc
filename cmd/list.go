@@ -25,7 +25,7 @@ func init() {
 }
 
 func doList(_ *cobra.Command, _ []string) error {
-	hdrs := report.Headers(vm.BootcVMConfig{}, map[string]string{
+	hdrs := report.Headers(config.CacheConfig{}, map[string]string{
 		"RepoTag":  "Repo",
 		"DiskSize": "Size",
 	})
@@ -58,7 +58,7 @@ func doList(_ *cobra.Command, _ []string) error {
 	return rpt.Execute(vmList)
 }
 
-func CollectVmList(user user.User, libvirtUri string) (vmList []vm.BootcVMConfig, err error) {
+func CollectVmList(user user.User, libvirtUri string) (vmList []config.CacheConfig, err error) {
 	files, err := os.ReadDir(user.CacheDir())
 	if err != nil {
 		return nil, err
@@ -72,31 +72,46 @@ func CollectVmList(user user.User, libvirtUri string) (vmList []vm.BootcVMConfig
 				continue
 			}
 
-			vmList = append(vmList, *cfg)
+			vmList = append(vmList, cfg)
 		}
 	}
 	return vmList, nil
 }
 
-func getVMInfo(user user.User, libvirtUri string, imageId string) (*vm.BootcVMConfig, error) {
+// getVMInfo loads the cached VM information from the config file
+// and checks if the VM is running
+func getVMInfo(user user.User, libvirtUri string, imageId string) (config.CacheConfig, error) {
+	cacheConfigManager, err := config.NewCacheConfigManager(user.CacheDir(), imageId)
+	if err != nil {
+		return config.CacheConfig{}, err
+	}
+	cacheConfig, err := cacheConfigManager.Read()
+	if err != nil {
+		return cacheConfig, err
+	}
+
+	cacheConfig.Id = cacheConfig.Id[:12]
+
 	bootcVM, err := vm.NewVM(vm.NewVMParameters{
 		ImageID:    imageId,
 		User:       user,
 		LibvirtUri: libvirtUri,
+		CacheConfig: cacheConfig,
 	})
 
 	if err != nil {
-		return nil, err
+		return cacheConfig, err
 	}
+
+	isRunning, err := bootcVM.IsRunning()
+	if err != nil {
+		return cacheConfig, err
+	}
+	cacheConfig.Running = isRunning
 
 	defer func() {
 		bootcVM.CloseConnection()
 	}()
 
-	cfg, err := bootcVM.GetConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+	return cacheConfig, nil
 }

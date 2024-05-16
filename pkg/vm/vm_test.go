@@ -7,12 +7,14 @@ import (
 	"os"
 	osUser "os/user"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"gitlab.com/bootc-org/podman-bootc/cmd"
 	"gitlab.com/bootc-org/podman-bootc/pkg/bootc"
 	"gitlab.com/bootc-org/podman-bootc/pkg/cache"
+	"gitlab.com/bootc-org/podman-bootc/pkg/config"
 	"gitlab.com/bootc-org/podman-bootc/pkg/container"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
 	"gitlab.com/bootc-org/podman-bootc/pkg/vm"
@@ -86,6 +88,11 @@ func createTestVM(imageId string) (bootcVM *vm.BootcVMLinux) {
 		ImageID:    imageId,
 		User:       testUser,
 		LibvirtUri: testLibvirtUri,
+		CacheConfig: config.CacheConfig{
+			Id:          imageId,
+			RepoTag:     testRepoTag,
+			Running:     false,
+		},
 	})
 	Expect(err).To(Not(HaveOccurred()))
 
@@ -136,7 +143,18 @@ func runTestVM(bootcVM vm.BootcVM) {
 	err = os.WriteFile(filepath.Join(testUser.CacheDir(), testImageID, "disk.raw"), []byte(""), 0700)
 	Expect(err).To(Not(HaveOccurred()))
 
-	err = bootcVM.WriteConfig(bootcDisk, containerImage)
+	diskSize, err := bootcDisk.GetSize()
+	cacheConfigManager, err := config.NewCacheConfigManager(testUser.CacheDir(), testImageID)
+	Expect(err).To(Not(HaveOccurred()))
+	err = cacheConfigManager.Write(config.CacheConfig{
+		Id:          testImageID,
+		SshPort:     22,
+		SshIdentity: testUserSSHKey,
+		RepoTag:     testRepoTag,
+		Created:     bootcDisk.GetCreatedAt().Format(time.RFC3339),
+		DiskSize:    strconv.FormatInt(diskSize, 10),
+		Running:     false,
+	})
 	Expect(err).To(Not(HaveOccurred()))
 }
 
@@ -228,7 +246,7 @@ var _ = Describe("VM", func() {
 			Expect(err).To(Not(HaveOccurred()))
 
 			Expect(vmList).To(HaveLen(1))
-			Expect(vmList[0]).To(Equal(vm.BootcVMConfig{
+			Expect(vmList[0]).To(Equal(config.CacheConfig{
 				Id:          testImageID[:12],
 				SshPort:     22,
 				SshIdentity: testUserSSHKey,
@@ -257,7 +275,7 @@ var _ = Describe("VM", func() {
 			Expect(err).To(Not(HaveOccurred()))
 
 			Expect(vmList).To(HaveLen(3))
-			Expect(vmList).To(ContainElement(vm.BootcVMConfig{
+			Expect(vmList).To(ContainElement(config.CacheConfig{
 				Id:          testImageID[:12],
 				SshPort:     22,
 				SshIdentity: testUserSSHKey,
@@ -267,7 +285,7 @@ var _ = Describe("VM", func() {
 				Running:     true,
 			}))
 
-			Expect(vmList).To(ContainElement(vm.BootcVMConfig{
+			Expect(vmList).To(ContainElement(config.CacheConfig{
 				Id:          id2[:12],
 				SshPort:     22,
 				SshIdentity: testUserSSHKey,
@@ -277,7 +295,7 @@ var _ = Describe("VM", func() {
 				Running:     true,
 			}))
 
-			Expect(vmList).To(ContainElement(vm.BootcVMConfig{
+			Expect(vmList).To(ContainElement(config.CacheConfig{
 				Id:          id3[:12],
 				SshPort:     22,
 				SshIdentity: testUserSSHKey,

@@ -2,7 +2,6 @@ package vm
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,11 +12,9 @@ import (
 
 	"gitlab.com/bootc-org/podman-bootc/pkg/bootc"
 	"gitlab.com/bootc-org/podman-bootc/pkg/config"
-	"gitlab.com/bootc-org/podman-bootc/pkg/container"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
 	"gitlab.com/bootc-org/podman-bootc/pkg/utils"
 
-	"github.com/docker/go-units"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
@@ -35,9 +32,10 @@ func GetVMCachePath(imageId string, user user.User) (longID string, path string,
 }
 
 type NewVMParameters struct {
-	ImageID    string
-	User       user.User //user who is running the podman bootc command
-	LibvirtUri string    //linux only
+	ImageID     string
+	User        user.User //user who is running the podman bootc command
+	LibvirtUri  string    //linux only
+	CacheConfig config.CacheConfig //existing cache config
 }
 
 type RunVMParameters struct {
@@ -56,12 +54,10 @@ type BootcVM interface {
 	Run(RunVMParameters) error
 	Delete() error
 	IsRunning() (bool, error)
-	WriteConfig(bootc.BootcDisk, container.ContainerImage) error
 	WaitForSSHToBeReady() error
-	RunSSH([]string) error
+	RunSSH(port int, identity string, cmd []string) error
 	DeleteFromCache() error
 	Exists() (bool, error)
-	GetConfig() (*BootcVMConfig, error)
 	CloseConnection()
 	PrintConsole() error
 }
@@ -85,72 +81,7 @@ type BootcVMCommon struct {
 	cloudInitDir  string
 	cloudInitArgs string
 	bootcDisk     bootc.BootcDisk
-}
-
-type BootcVMConfig struct {
-	Id          string `json:"Id,omitempty"`
-	SshPort     int    `json:"SshPort"`
-	SshIdentity string `json:"SshPriKey"`
-	RepoTag     string `json:"Repository"`
-	Created     string `json:"Created,omitempty"`
-	DiskSize    string `json:"DiskSize,omitempty"`
-	Running     bool   `json:"Running,omitempty"`
-}
-
-// writeConfig writes the configuration for the VM to the disk
-func (v *BootcVMCommon) WriteConfig(bootcDisk bootc.BootcDisk, containerImage container.ContainerImage) error {
-	size, err := bootcDisk.GetSize()
-	if err != nil {
-		return fmt.Errorf("get disk size: %w", err)
-	}
-	bcConfig := BootcVMConfig{
-		Id:          v.imageID[0:12],
-		SshPort:     v.sshPort,
-		SshIdentity: v.sshIdentity,
-		RepoTag:     containerImage.GetRepoTag(),
-		Created:     bootcDisk.GetCreatedAt().Format(time.RFC3339),
-		DiskSize:    strconv.FormatInt(size, 10),
-	}
-
-	bcConfigMsh, err := json.Marshal(bcConfig)
-	if err != nil {
-		return fmt.Errorf("marshal config data: %w", err)
-	}
-	cfgFile := filepath.Join(v.cacheDir, config.CfgFile)
-	err = os.WriteFile(cfgFile, bcConfigMsh, 0660)
-	if err != nil {
-		return fmt.Errorf("write config file: %w", err)
-	}
-	return nil
-
-}
-
-func (v *BootcVMCommon) LoadConfigFile() (cfg *BootcVMConfig, err error) {
-	cfgFile := filepath.Join(v.cacheDir, config.CfgFile)
-	fileContent, err := os.ReadFile(cfgFile)
-	if err != nil {
-		return
-	}
-
-	cfg = new(BootcVMConfig)
-	if err = json.Unmarshal(fileContent, cfg); err != nil {
-		return
-	}
-
-	//format the config values for display
-	createdTime, err := time.Parse(time.RFC3339, cfg.Created)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing created time: %w", err)
-	}
-	cfg.Created = units.HumanDuration(time.Since(createdTime)) + " ago"
-
-	diskSizeFloat, err := strconv.ParseFloat(cfg.DiskSize, 64)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing disk size: %w", err)
-	}
-	cfg.DiskSize = units.HumanSizeWithPrecision(diskSizeFloat, 3)
-
-	return
+	cacheConfig   config.CacheConfig
 }
 
 func (v *BootcVMCommon) SetUser(user string) error {
@@ -202,14 +133,9 @@ func (v *BootcVMCommon) WaitForSSHToBeReady() error {
 }
 
 // RunSSH runs a command over ssh or starts an interactive ssh connection if no command is provided
-func (v *BootcVMCommon) RunSSH(inputArgs []string) error {
-	cfg, err := v.LoadConfigFile()
-	if err != nil {
-		return fmt.Errorf("failed to load VM config: %w", err)
-	}
-
-	v.sshPort = cfg.SshPort
-	v.sshIdentity = cfg.SshIdentity
+func (v *BootcVMCommon) RunSSH(sshPort int, sshIdentity string, inputArgs []string) error {
+	v.sshPort = sshPort
+	v.sshIdentity = sshIdentity
 
 	sshDestination := v.vmUsername + "@localhost"
 	port := strconv.Itoa(v.sshPort)

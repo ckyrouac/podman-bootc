@@ -52,6 +52,7 @@ func NewVM(params NewVMParameters) (vm *BootcVMLinux, err error) {
 			cacheDir:      cacheDir,
 			diskImagePath: filepath.Join(cacheDir, config.DiskImage),
 			user:          params.User,
+			cacheConfig:   params.CacheConfig,
 		},
 	}
 
@@ -61,20 +62,6 @@ func NewVM(params NewVMParameters) (vm *BootcVMLinux, err error) {
 	}
 
 	return vm, nil
-}
-
-func (v *BootcVMLinux) GetConfig() (cfg *BootcVMConfig, err error) {
-	cfg, err = v.LoadConfigFile()
-	if err != nil {
-		return
-	}
-
-	cfg.Running, err = v.IsRunning()
-	if err != nil {
-		return
-	}
-
-	return
 }
 
 func (v *BootcVMLinux) PrintConsole() (err error) {
@@ -280,12 +267,8 @@ func (v *BootcVMLinux) loadExistingDomain() (err error) {
 
 	// if domain exists, load it's config
 	if v.domain != nil {
-		cfg, err := v.GetConfig()
-		if err != nil {
-			return fmt.Errorf("unable to load VM config: %w", err)
-		}
-		v.sshPort = cfg.SshPort
-		v.sshIdentity = cfg.SshIdentity
+		v.sshPort = v.cacheConfig.SshPort
+		v.sshIdentity = v.cacheConfig.SshIdentity
 	}
 
 	return nil
