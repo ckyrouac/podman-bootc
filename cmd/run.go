@@ -161,8 +161,16 @@ func doRun(flags *cobra.Command, args []string) error {
 	}
 
 	// create the disk image
-	bootcDisk := bootc.NewBootcDisk(containerImage, ctx, user, cacheDir, bustCache)
-	err = bootcDisk.Install(vmConfig.Quiet, diskImageConfigInstance)
+	bootcDisk := bootc.NewBootcDisk(bootc.BootcDiskParams{
+		ContainerImage:  containerImage,
+		Ctx:             ctx,
+		User:            user,
+		Cache:           cacheDir,
+		BustCache:       bustCache,
+		DiskImageConfig: diskImageConfigInstance,
+		Quiet:           vmConfig.Quiet,
+	})
+	err = bootcDisk.Install()
 
 	if err != nil {
 		return fmt.Errorf("unable to install bootc image: %w", err)
