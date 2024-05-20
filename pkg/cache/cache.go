@@ -5,16 +5,24 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sirupsen/logrus"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
 	"gitlab.com/bootc-org/podman-bootc/pkg/utils"
 )
 
-func NewCache(imageId string, user user.User) Cache {
-	return Cache{
-		ImageId: imageId,
-		User:    user,
+// NewCache creates a new cache object
+// Parameters:
+//     - id: the full or partial image ID. If partial, it will be expanded to the full image ID
+//     - user: the user who is running the podman-bootc command
+func NewCache(id string, user user.User) (cache Cache, err error) {
+	fullImageId, err := utils.FullImageIdFromPartial(id, user)
+	if err != nil {
+		return Cache{}, err
 	}
+
+	return Cache{
+		ImageId: fullImageId,
+		User:    user,
+	}, nil
 }
 
 type Cache struct {
@@ -22,25 +30,12 @@ type Cache struct {
 	ImageId   string
 	Directory string
 	Created	  bool
+	lock      CacheLock
 }
 
 // Create VM cache dir; one per oci bootc image
 func (p *Cache) Create() (err error) {
 	p.Directory = filepath.Join(p.User.CacheDir(), p.ImageId)
-	lock := utils.NewCacheLock(p.User.RunDir(), p.Directory)
-	locked, err := lock.TryLock(utils.Exclusive)
-	if err != nil {
-		return fmt.Errorf("error locking the VM cache path: %w", err)
-	}
-	if !locked {
-		return fmt.Errorf("unable to lock the VM cache path")
-	}
-
-	defer func() {
-		if err := lock.Unlock(); err != nil {
-			logrus.Errorf("unable to unlock VM %s: %v", p.ImageId, err)
-		}
-	}()
 
 	if err := os.MkdirAll(p.Directory, os.ModePerm); err != nil {
 		return fmt.Errorf("error while making bootc disk directory: %w", err)
@@ -64,3 +59,21 @@ func (p *Cache) GetDiskPath() string {
 	}
 	return filepath.Join(p.GetDirectory(), "disk.raw")
 }
+
+func (p *Cache) Lock(mode AccessMode) error {
+	p.lock = NewCacheLock(p.User.RunDir(), p.Directory)
+	locked, err := p.lock.TryLock(Exclusive)
+	if err != nil {
+		return fmt.Errorf("error locking the cache path: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("unable to lock the cache path")
+	}
+
+	return nil
+}
+
+func (p *Cache) Unlock() error {
+	return p.lock.Unlock()
+}
+

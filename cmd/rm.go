@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"gitlab.com/bootc-org/podman-bootc/pkg/cache"
 	"gitlab.com/bootc-org/podman-bootc/pkg/config"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
-	"gitlab.com/bootc-org/podman-bootc/pkg/utils"
 	"gitlab.com/bootc-org/podman-bootc/pkg/vm"
 
 	"github.com/sirupsen/logrus"
@@ -44,6 +44,7 @@ func oneOrAll() cobra.PositionalArgs {
 }
 
 func doRemove(_ *cobra.Command, args []string) error {
+
 	if removeAll {
 		return pruneAll()
 	}
@@ -57,20 +58,33 @@ func prune(id string) error {
 		return err
 	}
 
+	// take an exclusive lock on the cache directory
+	cacheDir, err := cache.NewCache(id, user)
+	if err != nil {
+		return err
+	}
+	err = cacheDir.Create()
+	if err != nil {
+		return err
+	}
+	err = cacheDir.Lock(cache.Exclusive)
+	if err != nil {
+		return err
+	}
+
 	bootcVM, err := vm.NewVM(vm.NewVMParameters{
 		ImageID:    id,
 		LibvirtUri: config.LibvirtUri,
 		User:       user,
-		Locking:    utils.Exclusive,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to get VM %s: %v", id, err)
 	}
 
-	// Let's be explicit instead of relying on the defer exec order
 	defer func() {
+		// Let's be explicit instead of relying on the defer exec order
 		bootcVM.CloseConnection()
-		if err := bootcVM.Unlock(); err != nil {
+		if err := cacheDir.Unlock(); err != nil {
 			logrus.Warningf("unable to unlock VM %s: %v", id, err)
 		}
 	}()
