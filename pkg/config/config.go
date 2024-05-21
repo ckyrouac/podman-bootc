@@ -5,11 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
-
-	"github.com/docker/go-units"
 )
 
 const (
@@ -25,18 +21,20 @@ const (
 )
 
 type CacheConfig struct {
-	Id          string `json:"Id,omitempty"`
-	SshPort     int    `json:"SshPort"`
-	SshIdentity string `json:"SshPriKey"`
-	RepoTag     string `json:"Repository"`
-	Created     string `json:"Created,omitempty"`
-	DiskSize    string `json:"DiskSize,omitempty"`
-	Running     bool   `json:"Running,omitempty"`
+	Id             string `json:"Id,omitempty"`
+	SshPort        int    `json:"SshPort"`
+	SshIdentity    string `json:"SshPriKey"`
+	RepoTag        string `json:"Repository"`
+	Created        string `json:"Created,omitempty"`
+	DiskSize       string `json:"DiskSize,omitempty"`
+	Filesystem string `json:"FilesystemType,omitempty"`
+	RootSizeMax    string `json:"RootSizeMax,omitempty"`
+	Running        bool   `json:"Running,omitempty"`
 }
 
 type CacheConfigManager struct {
-	CacheDir string
-	ImageID  string
+	CacheDir   string
+	ImageID    string
 	configFile string
 }
 
@@ -58,8 +56,8 @@ func NewCacheConfigManager(cacheDir string, imageId string) (*CacheConfigManager
 	}
 
 	return &CacheConfigManager{
-		CacheDir: cacheDir,
-		ImageID:  imageId,
+		CacheDir:   cacheDir,
+		ImageID:    imageId,
 		configFile: filepath.Join(cacheDir, fullImageId, CfgFile),
 	}, nil
 }
@@ -76,7 +74,13 @@ func (c *CacheConfigManager) Write(cacheConfig CacheConfig) error {
 	return nil
 }
 
+// Read reads the cache config file and returns the cache cacheConfig
+// If the file does not exist, it returns an empty cacheConfig
 func (c *CacheConfigManager) Read() (cacheConfig CacheConfig, err error) {
+	if _, err = os.Stat(c.configFile); err != nil {
+		return cacheConfig, nil
+	}
+
 	fileContent, err := os.ReadFile(c.configFile)
 	if err != nil {
 		return
@@ -86,19 +90,5 @@ func (c *CacheConfigManager) Read() (cacheConfig CacheConfig, err error) {
 		return
 	}
 
-	//format the config values for display
-	createdTime, err := time.Parse(time.RFC3339, cacheConfig.Created)
-	if err != nil {
-		return cacheConfig, fmt.Errorf("error parsing created time: %w", err)
-	}
-	cacheConfig.Created = units.HumanDuration(time.Since(createdTime)) + " ago"
-
-	diskSizeFloat, err := strconv.ParseFloat(cacheConfig.DiskSize, 64)
-	if err != nil {
-		return cacheConfig, fmt.Errorf("error parsing disk size: %w", err)
-	}
-	cacheConfig.DiskSize = units.HumanSizeWithPrecision(diskSizeFloat, 3)
-
 	return
 }
-

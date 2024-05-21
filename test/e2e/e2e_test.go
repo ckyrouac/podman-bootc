@@ -360,6 +360,62 @@ var _ = Describe("E2E", func() {
 			Expect(fileInfo.Size()).To(Equal(int64(27000000512)))
 		})
 
+		It("Should not rebuild the cached disk if the --disk-size doesn't change", func() {
+			//stop the VM first
+			err := vm.StdIn.Close()
+			Expect(err).To(Not(HaveOccurred()))
+			_, _, err = e2e.RunPodmanBootc("stop", vm.Id)
+			Expect(err).To(Not(HaveOccurred()))
+
+			Eventually(func() bool {
+				vmExists, err := e2e.VMExists(vm.Id)
+				Expect(err).To(Not(HaveOccurred()))
+				return vmExists
+			}).Should(BeFalse())
+
+			//get the modification timestamp of the current disk
+			vmDirs, err := e2e.ListCacheDirs()
+			Expect(err).To(Not(HaveOccurred()))
+			Expect(vmDirs).To(HaveLen(1))
+			fileInfo, err := os.Stat(filepath.Join(vmDirs[0], config.DiskImage))
+			Expect(err).To(Not(HaveOccurred()))
+			originalModTime := fileInfo.ModTime()
+
+			//run the VM with the same disk size
+			vm, err = e2e.BootVM(e2e.BaseImage, "--disk-size", "27G")
+			Expect(err).To(Not(HaveOccurred()))
+
+			//verify the modification time of the disk hasn't changed
+			fileInfo, err = os.Stat(filepath.Join(vmDirs[0], config.DiskImage))
+			Expect(originalModTime).To(Equal(fileInfo.ModTime()))
+		})
+
+		It("Should rebuild the cached disk if run without --disk-size after previously run with --disk-size", func() {
+			//stop the VM first
+			err := vm.StdIn.Close()
+			Expect(err).To(Not(HaveOccurred()))
+			_, _, err = e2e.RunPodmanBootc("stop", vm.Id)
+			Expect(err).To(Not(HaveOccurred()))
+
+			Eventually(func() bool {
+				vmExists, err := e2e.VMExists(vm.Id)
+				Expect(err).To(Not(HaveOccurred()))
+				return vmExists
+			}).Should(BeFalse())
+
+			//run the VM without specifying a disk size
+			vm, err = e2e.BootVM(e2e.BaseImage)
+			Expect(err).To(Not(HaveOccurred()))
+
+			//verify the disk size updated to the default size
+			vmDirs, err := e2e.ListCacheDirs()
+			Expect(err).To(Not(HaveOccurred()))
+			Expect(vmDirs).To(HaveLen(1))
+			fileInfo, err := os.Stat(filepath.Join(vmDirs[0], config.DiskImage))
+			Expect(err).To(Not(HaveOccurred()))
+			Expect(fileInfo.Size()).To(Equal(int64(10737418240)))
+		})
+
 		AfterAll(func() {
 			vm.StdIn.Close()
 			e2e.Cleanup()

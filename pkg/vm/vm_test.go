@@ -84,15 +84,30 @@ func createTestVM(imageId string) (bootcVM *vm.BootcVMLinux) {
 	err := os.MkdirAll(filepath.Join(testUser.CacheDir(), imageId), 0700)
 	Expect(err).To(Not(HaveOccurred()))
 
+	configManager, err := config.NewCacheConfigManager(testUser.CacheDir(), imageId)
+	Expect(err).To(Not(HaveOccurred()))
+
+	created := time.Now()
+	created = created.Add(-time.Duration(1 * time.Minute))
+
+	err = configManager.Write(config.CacheConfig{
+		Id:      imageId,
+		RepoTag: testRepoTag,
+		Running: false,
+		SshIdentity: testUserSSHKey,
+		SshPort: 22,
+		Created: created.Format(time.RFC3339),
+		DiskSize: "0",
+	})
+	Expect(err).To(Not(HaveOccurred()))
+	cacheConfig, err := configManager.Read()
+	Expect(err).To(Not(HaveOccurred()))
+
 	bootcVM, err = vm.NewVM(vm.NewVMParameters{
 		ImageID:    imageId,
 		User:       testUser,
 		LibvirtUri: testLibvirtUri,
-		CacheConfig: config.CacheConfig{
-			Id:          imageId,
-			RepoTag:     testRepoTag,
-			Running:     false,
-		},
+		CacheConfig: cacheConfig,
 	})
 	Expect(err).To(Not(HaveOccurred()))
 
@@ -126,10 +141,10 @@ func runTestVM(bootcVM vm.BootcVM) {
 	}
 
 	cache := cache.Cache{
-		User: testUser,
-		ImageId: testImageID,
+		User:      testUser,
+		ImageId:   testImageID,
 		Directory: filepath.Join(testUser.CacheDir(), testImageID),
-		Created: true,
+		Created:   true,
 	}
 
 	bootcDisk := bootc.BootcDisk{
@@ -283,6 +298,8 @@ var _ = Describe("VM", func() {
 				Created:     "About a minute ago",
 				DiskSize:    "0B",
 				Running:     true,
+				Filesystem:  "",
+				RootSizeMax: "",
 			}))
 
 			Expect(vmList).To(ContainElement(config.CacheConfig{
@@ -293,6 +310,8 @@ var _ = Describe("VM", func() {
 				Created:     "About a minute ago",
 				DiskSize:    "0B",
 				Running:     true,
+				Filesystem:  "",
+				RootSizeMax: "",
 			}))
 
 			Expect(vmList).To(ContainElement(config.CacheConfig{
@@ -303,6 +322,8 @@ var _ = Describe("VM", func() {
 				Created:     "About a minute ago",
 				DiskSize:    "0B",
 				Running:     true,
+				Filesystem:  "",
+				RootSizeMax: "",
 			}))
 		})
 	})

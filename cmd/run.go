@@ -125,6 +125,16 @@ func doRun(flags *cobra.Command, args []string) error {
 		return err
 	}
 
+	//load any existing cache config
+	cacheConfigManager, err := config.NewCacheConfigManager(user.CacheDir(), containerImage.Id)
+	if err != nil {
+		return fmt.Errorf("unable to create cache config manager: %w", err)
+	}
+	cacheConfig, err := cacheConfigManager.Read()
+	if err != nil {
+		return fmt.Errorf("unable to read cache config: %w", err)
+	}
+
 	// check if the vm is already running
 	bootcVM, err := vm.NewVM(vm.NewVMParameters{
 		ImageID:    containerImage.GetId(),
@@ -152,23 +162,15 @@ func doRun(flags *cobra.Command, args []string) error {
 		return fmt.Errorf("VM already running, use the ssh command to connect to it")
 	}
 
-	// if any of these parameters are set, we need to rebuild the disk image if one exists
-	bustCache := false
-	if diskImageConfigInstance.DiskSize != "" ||
-		diskImageConfigInstance.RootSizeMax != "" ||
-		diskImageConfigInstance.Filesystem != "" {
-		bustCache = true
-	}
-
 	// create the disk image
 	bootcDisk := bootc.NewBootcDisk(bootc.BootcDiskParams{
 		ContainerImage:  containerImage,
 		Ctx:             ctx,
 		User:            user,
 		Cache:           cacheDir,
-		BustCache:       bustCache,
 		DiskImageConfig: diskImageConfigInstance,
 		Quiet:           vmConfig.Quiet,
+		CacheConfig:     cacheConfig,
 	})
 	err = bootcDisk.Install()
 
@@ -210,19 +212,17 @@ func doRun(flags *cobra.Command, args []string) error {
 		return fmt.Errorf("unable to get disk size: %w", err)
 	}
 
-	cacheConfig := config.CacheConfig{
-		Id:          containerImage.Id,
-		SshPort:     sshPort,
-		SshIdentity: machineInfo.SSHIdentityPath,
-		RepoTag:     containerImage.RepoTag,
-		Created:     bootcDisk.GetCreatedAt().Format(time.RFC3339),
-		DiskSize:    strconv.FormatInt(diskSize, 10),
+	updatedCacheConfig := config.CacheConfig{
+		Id:             containerImage.Id,
+		SshPort:        sshPort,
+		SshIdentity:    machineInfo.SSHIdentityPath,
+		RepoTag:        containerImage.RepoTag,
+		Created:        bootcDisk.GetCreatedAt().Format(time.RFC3339),
+		DiskSize:       strconv.FormatInt(diskSize, 10),
+		RootSizeMax:    diskImageConfigInstance.RootSizeMax,
+		Filesystem: diskImageConfigInstance.Filesystem,
 	}
-	cacheConfigManager, err := config.NewCacheConfigManager(user.CacheDir(), containerImage.Id)
-	if err != nil {
-		return fmt.Errorf("unable to create cache config manager: %w", err)
-	}
-	if err = cacheConfigManager.Write(cacheConfig); err != nil {
+	if err = cacheConfigManager.Write(updatedCacheConfig); err != nil {
 		return err
 	}
 

@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"gitlab.com/bootc-org/podman-bootc/pkg/cache"
+	"gitlab.com/bootc-org/podman-bootc/pkg/config"
 	"gitlab.com/bootc-org/podman-bootc/pkg/container"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
 
@@ -71,6 +73,7 @@ type BootcDisk struct {
 	bustCache               bool
 	diskImageConfig         DiskImageConfig
 	quiet                   bool
+	cacheConfig             config.CacheConfig
 }
 
 // create singleton for easy cleanup
@@ -83,9 +86,9 @@ type BootcDiskParams struct {
 	ContainerImage  container.ContainerImage
 	Ctx             context.Context
 	User            user.User
-	Cache           cache.Cache
-	BustCache       bool
-	DiskImageConfig DiskImageConfig
+	Cache           cache.Cache        // the cache directory
+	CacheConfig     config.CacheConfig // the cached configuration options
+	DiskImageConfig DiskImageConfig    // the disk image options sent by the user
 	Quiet           bool
 }
 
@@ -104,9 +107,9 @@ func NewBootcDisk(params BootcDiskParams) *BootcDisk {
 			Ctx:             params.Ctx,
 			User:            params.User,
 			Cache:           params.Cache,
-			bustCache:       params.BustCache,
 			diskImageConfig: params.DiskImageConfig,
 			quiet:           params.Quiet,
+			cacheConfig:     params.CacheConfig,
 		}
 	})
 	return instance
@@ -127,8 +130,43 @@ func (p *BootcDisk) GetCreatedAt() time.Time {
 	return p.CreatedAt
 }
 
+// shouldBustCache compares the cached configuration with the requested configuration
+// and updates the bustCache flag if a discrepancy is found
+func (p *BootcDisk) shouldBustCache() error {
+	p.bustCache = false
+
+	if p.cacheConfig.DiskSize != "" {
+		requestedDiskSize, err := p.calculateDiskSize(p.diskImageConfig.DiskSize)
+		if err != nil {
+			return err
+		}
+
+		cachedDiskSize, err := strconv.ParseInt(p.cacheConfig.DiskSize, 10, 64)
+		if err != nil {
+			return err
+		}
+
+		if cachedDiskSize != requestedDiskSize {
+			p.bustCache = true
+		}
+	}
+
+	if p.cacheConfig.Filesystem != p.diskImageConfig.Filesystem {
+		p.bustCache = true
+	} else if p.cacheConfig.RootSizeMax != p.diskImageConfig.RootSizeMax {
+		p.bustCache = true
+	}
+
+	return nil
+}
+
 func (p *BootcDisk) Install() (err error) {
 	p.CreatedAt = time.Now()
+
+	err = p.shouldBustCache()
+	if err != nil {
+		return
+	}
 
 	err = p.getOrInstallImageToDisk()
 	if err != nil {
@@ -209,21 +247,15 @@ func align(size int64, align int64) int64 {
 	return size
 }
 
-// bootcInstallImageToDisk creates a disk image from a bootc container
-func (p *BootcDisk) bootcInstallImageToDisk() (err error) {
-	fmt.Printf("Executing `bootc install to-disk` from container image %s to create disk image\n", p.ContainerImage.GetRepoTag())
-	p.file, err = os.CreateTemp(p.Cache.GetDirectory(), "podman-bootc-tempdisk")
-	if err != nil {
-		return err
-	}
-	size := p.ContainerImage.GetSize() * containerSizeToDiskSizeMultiplier
+func (p *BootcDisk) calculateDiskSize(humanSize string) (size int64, err error) {
+	size = p.ContainerImage.GetSize() * containerSizeToDiskSizeMultiplier
 	if size < diskSizeMinimum {
 		size = diskSizeMinimum
 	}
-	if p.diskImageConfig.DiskSize != "" {
-		diskConfigSize, err := units.FromHumanSize(p.diskImageConfig.DiskSize)
+	if humanSize != "" {
+		diskConfigSize, err := units.FromHumanSize(humanSize)
 		if err != nil {
-			return err
+			return -1, err
 		}
 		if size < diskConfigSize {
 			size = diskConfigSize
@@ -231,6 +263,22 @@ func (p *BootcDisk) bootcInstallImageToDisk() (err error) {
 	}
 	// Round up to 4k; loopback wants at least 512b alignment
 	size = align(size, 4096)
+	return size, nil
+}
+
+// bootcInstallImageToDisk creates a disk image from a bootc container
+func (p *BootcDisk) bootcInstallImageToDisk() (err error) {
+	fmt.Printf("Executing `bootc install to-disk` from container image %s to create disk image\n", p.ContainerImage.GetRepoTag())
+	p.file, err = os.CreateTemp(p.Cache.GetDirectory(), "podman-bootc-tempdisk")
+	if err != nil {
+		return err
+	}
+
+	size, err := p.calculateDiskSize(p.diskImageConfig.DiskSize)
+	if err != nil {
+		return fmt.Errorf("failed to calculate disk size: %w", err)
+	}
+
 	humanContainerSize := units.HumanSize(float64(p.ContainerImage.GetSize()))
 	humanSize := units.HumanSize(float64(size))
 	logrus.Infof("container size: %s, disk size: %s", humanContainerSize, humanSize)

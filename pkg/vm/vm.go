@@ -33,8 +33,8 @@ func GetVMCachePath(imageId string, user user.User) (longID string, path string,
 
 type NewVMParameters struct {
 	ImageID     string
-	User        user.User //user who is running the podman bootc command
-	LibvirtUri  string    //linux only
+	User        user.User          //user who is running the podman bootc command
+	LibvirtUri  string             //linux only
 	CacheConfig config.CacheConfig //existing cache config
 }
 

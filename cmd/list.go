@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"strconv"
+	"time"
 
 	"gitlab.com/bootc-org/podman-bootc/pkg/config"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
 	"gitlab.com/bootc-org/podman-bootc/pkg/vm"
 
 	"github.com/containers/common/pkg/report"
+	"github.com/docker/go-units"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -90,7 +94,10 @@ func getVMInfo(user user.User, libvirtUri string, imageId string) (config.CacheC
 		return cacheConfig, err
 	}
 
-	cacheConfig.Id = cacheConfig.Id[:12]
+	cacheConfig, err = formatConfigValues(cacheConfig)
+	if err != nil {
+		return cacheConfig, err
+	}
 
 	bootcVM, err := vm.NewVM(vm.NewVMParameters{
 		ImageID:    imageId,
@@ -112,6 +119,31 @@ func getVMInfo(user user.User, libvirtUri string, imageId string) (config.CacheC
 	defer func() {
 		bootcVM.CloseConnection()
 	}()
+
+	return cacheConfig, nil
+}
+
+//format the config values for display
+func formatConfigValues(cacheConfig config.CacheConfig) (config.CacheConfig, error) {
+	if cacheConfig.Id != "" {
+		cacheConfig.Id = cacheConfig.Id[:12]
+	}
+
+	if cacheConfig.Created != "" {
+		createdTime, err := time.Parse(time.RFC3339, cacheConfig.Created)
+		if err != nil {
+			return cacheConfig, fmt.Errorf("error parsing created time: %w", err)
+		}
+		cacheConfig.Created = units.HumanDuration(time.Since(createdTime)) + " ago"
+	}
+
+	if cacheConfig.DiskSize != "" {
+		diskSizeFloat, err := strconv.ParseFloat(cacheConfig.DiskSize, 64)
+		if err != nil {
+			return cacheConfig, fmt.Errorf("error parsing disk size: %w", err)
+		}
+		cacheConfig.DiskSize = units.HumanSizeWithPrecision(diskSizeFloat, 3)
+	}
 
 	return cacheConfig, nil
 }

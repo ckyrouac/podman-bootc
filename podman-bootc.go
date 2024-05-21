@@ -9,8 +9,6 @@ import (
 
 	"gitlab.com/bootc-org/podman-bootc/cmd"
 	"gitlab.com/bootc-org/podman-bootc/pkg/bootc"
-	"gitlab.com/bootc-org/podman-bootc/pkg/cache"
-	"gitlab.com/bootc-org/podman-bootc/pkg/container"
 	"gitlab.com/bootc-org/podman-bootc/pkg/user"
 	"gitlab.com/bootc-org/podman-bootc/pkg/utils"
 
@@ -59,7 +57,10 @@ func cleanup() {
 	}
 
 	//delete the disk image
-	err = bootc.NewBootcDisk(container.ContainerImage{}, ctx, user, cache.Cache{}, false).Cleanup()
+	err = bootc.NewBootcDisk(bootc.BootcDiskParams{
+		Ctx:             ctx,
+		User:            user,
+	}).Cleanup()
 	if err != nil {
 		logrus.Errorf("unable to get podman machine info: %s", err)
 		os.Exit(0)
